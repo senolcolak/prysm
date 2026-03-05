@@ -116,6 +116,40 @@ analysis. Whether you need to integrate with Prometheus, send real-time alerts
 via NATS, or simply log and visualize system performance, Prysm offers the
 tools and flexibility to meet your needs.
 
+## Documentation
+
+Comprehensive documentation is available in the [`/docs`](./docs) directory:
+
+### Getting Started
+- **[Documentation Index](./docs/INDEX.md)** - Complete navigation guide
+- **[Architecture](./docs/ARCHITECTURE.md)** - System design and component interactions
+- **[Deployment Guide](./docs/DEPLOYMENT.md)** - Installation and configuration
+- **[Quick Reference](./docs/QUICK_REFERENCE.md)** - Command cheat sheet
+
+### Current State Analysis
+- **[Honest Analysis](./docs/HONEST_ANALYSIS.md)** - Current maturity assessment (v1)
+  - Overall score: 5.35/10 (early beta)
+  - Test coverage: 6.7%
+  - Production readiness evaluation
+  - Comparison with similar tools
+
+### Future Design
+- **[Prysm-NG Design](./docs/PRYSM_NG_DESIGN.md)** - Enterprise-grade redesign
+  - Full HA, persistence, and plugin architecture
+  - Timeline: 12-15 months
+- **[Prysm-NG-Small Design](./docs/PRYSM_NG_SMALL_DESIGN.md)** - Minimal footprint solution ⭐
+  - Vector-inspired pipeline architecture
+  - <15MB binary, <50MB RAM
+  - Timeline: 6-9 months
+  - 10x cost reduction for scale deployments
+- **[Design Comparison](./docs/DESIGN_COMPARISON.md)** - Side-by-side comparison
+  - Decision matrix for choosing the right approach
+  - Recommendation: Build NG-Small first
+
+### Additional Resources
+- **[Code Explained](./docs/CODE_EXPLAINED.md)** - Deep dive into implementation
+- **[Next Steps](./docs/NEXT_STEPS.md)** - Post-deployment activities
+
 ## Support, Feedback, Contributing
 
 This project is open to feature requests/suggestions, bug reports, etc. via
