@@ -6,6 +6,7 @@ package rgwadmin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -684,4 +685,215 @@ func TestUserStat_JSONDeserialization(t *testing.T) {
 	assert.Equal(t, uint64(4096), *stat.SizeRounded)
 	assert.NotNil(t, stat.NumObjects)
 	assert.Equal(t, uint64(10), *stat.NumObjects)
+}
+
+func TestAPI_GetUsers(t *testing.T) {
+	mock := &mockHTTPClient{
+		response: newMockResponse(200, `["user1","user2","admin"]`),
+	}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	users, err := api.GetUsers(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, users, 3)
+	assert.Contains(t, users, "user1")
+	assert.Contains(t, users, "admin")
+}
+
+func TestAPI_GetUsers_Error(t *testing.T) {
+	mock := &mockHTTPClient{
+		response: newMockResponse(403, `{"Code":"AccessDenied","RequestId":"req-1","HostId":"host-1"}`),
+	}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	_, err = api.GetUsers(context.Background())
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrAccessDenied))
+}
+
+func TestAPI_GetUsers_HTTPFailure(t *testing.T) {
+	mock := &mockHTTPClient{
+		err: errors.New("connection refused"),
+	}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	_, err = api.GetUsers(context.Background())
+	assert.Error(t, err)
+}
+
+func TestAPI_GetUser(t *testing.T) {
+	responseJSON := `{
+		"user_id": "testuser",
+		"display_name": "Test User",
+		"email": "test@example.com",
+		"type": "rgw",
+		"tenant": "mytenant",
+		"keys": [{"user": "testuser", "access_key": "key1", "secret_key": "secret1"}]
+	}`
+
+	mock := &mockHTTPClient{
+		response: newMockResponse(200, responseJSON),
+	}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	user, err := api.GetUser(context.Background(), User{ID: "testuser"})
+	assert.NoError(t, err)
+	assert.Equal(t, "testuser", user.ID)
+	assert.Equal(t, "Test User", user.DisplayName)
+	assert.Equal(t, "mytenant", user.Tenant)
+}
+
+func TestAPI_GetUser_MissingID(t *testing.T) {
+	mock := &mockHTTPClient{}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	_, err = api.GetUser(context.Background(), User{})
+	assert.Error(t, err)
+	assert.Equal(t, errMissingUserID, err)
+}
+
+func TestAPI_GetKVUser(t *testing.T) {
+	responseJSON := `{
+		"user_id": "testuser",
+		"display_name": "Test User",
+		"tenant": "t1"
+	}`
+
+	mock := &mockHTTPClient{
+		response: newMockResponse(200, responseJSON),
+	}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	kvUser, err := api.GetKVUser(context.Background(), User{ID: "testuser"})
+	assert.NoError(t, err)
+	assert.Equal(t, "testuser", kvUser.ID)
+	assert.Equal(t, "t1", kvUser.Tenant)
+}
+
+func TestAPI_ListBuckets(t *testing.T) {
+	mock := &mockHTTPClient{
+		response: newMockResponse(200, `["bucket1","bucket2","bucket3"]`),
+	}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	buckets, err := api.ListBuckets(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, buckets, 3)
+	assert.Equal(t, "bucket1", buckets[0])
+}
+
+func TestAPI_GetBucketInfo(t *testing.T) {
+	responseJSON := `{
+		"bucket": "test-bucket",
+		"owner": "admin",
+		"tenant": "default",
+		"id": "bucket-123"
+	}`
+
+	mock := &mockHTTPClient{
+		response: newMockResponse(200, responseJSON),
+	}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	bucket, err := api.GetBucketInfo(context.Background(), Bucket{Bucket: "test-bucket"})
+	assert.NoError(t, err)
+	assert.Equal(t, "test-bucket", bucket.Bucket)
+	assert.Equal(t, "admin", bucket.Owner)
+}
+
+func TestAPI_GetUsage(t *testing.T) {
+	responseJSON := `{
+		"entries": [
+			{
+				"user": "admin",
+				"buckets": [
+					{
+						"bucket": "b1",
+						"time": "2024-01-15 12:00:00.000000Z",
+						"epoch": 1705320000,
+						"owner": "admin",
+						"categories": [
+							{"category": "get_obj", "bytes_sent": 1024, "ops": 10, "successful_ops": 10}
+						]
+					}
+				]
+			}
+		],
+		"summary": []
+	}`
+
+	mock := &mockHTTPClient{
+		response: newMockResponse(200, responseJSON),
+	}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	showEntries := true
+	usage, err := api.GetUsage(context.Background(), Usage{
+		UserID:      "admin",
+		ShowEntries: &showEntries,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, usage.Entries, 1)
+	assert.Equal(t, "admin", usage.Entries[0].User)
+}
+
+func TestAPI_ListBuckets_NotFound(t *testing.T) {
+	mock := &mockHTTPClient{
+		response: newMockResponse(404, `{"Code":"NoSuchBucket","RequestId":"r","HostId":"h"}`),
+	}
+
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+
+	_, err = api.ListBuckets(context.Background())
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNoSuchBucket))
+}
+
+func TestNew_WithCustomHTTPClient(t *testing.T) {
+	mock := &mockHTTPClient{}
+	api, err := New("http://localhost:8080", "access", "secret", mock)
+	assert.NoError(t, err)
+	assert.Equal(t, mock, api.HTTPClient)
+}
+
+func TestExplicitPlacement_JSON(t *testing.T) {
+	jsonData := `{
+		"data_pool": "default.rgw.buckets.data",
+		"data_extra_pool": "default.rgw.buckets.non-ec",
+		"index_pool": "default.rgw.buckets.index"
+	}`
+
+	var ep ExplicitPlacement
+	err := json.Unmarshal([]byte(jsonData), &ep)
+	assert.NoError(t, err)
+	assert.Equal(t, "default.rgw.buckets.data", ep.DataPool)
+	assert.Equal(t, "default.rgw.buckets.index", ep.IndexPool)
+}
+
+func TestSubuserAccessConstants(t *testing.T) {
+	assert.Equal(t, SubuserAccess(""), SubuserAccessNone)
+	assert.Equal(t, SubuserAccess("read"), SubuserAccessRead)
+	assert.Equal(t, SubuserAccess("write"), SubuserAccessWrite)
+	assert.Equal(t, SubuserAccess("readwrite"), SubuserAccessReadWrite)
+	assert.Equal(t, SubuserAccess("full"), SubuserAccessFull)
+	assert.Equal(t, SubuserAccess("full-control"), SubuserAccessReplyFull)
 }
