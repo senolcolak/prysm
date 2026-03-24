@@ -314,3 +314,127 @@ func TestProcessAndUpdateATASmartAttributes_PercentageAttributes(t *testing.T) {
 		assert.Equal(t, int64(10), attr.Value) // 100 - 90 = 10
 	}
 }
+
+func TestNormalizeSmartData_ATA(t *testing.T) {
+	smartData := &SmartCtlOutput{
+		Device: SmartCtlDevice{
+			Name:     "/dev/sda",
+			Protocol: "ATA",
+			Type:     "sat",
+		},
+		ModelName:       "WDC WD10EZEX-00BN5A0",
+		SerialNumber:    "WD-WMC3T0123456",
+		FirmwareVersion: "01.01A01",
+		Temperature:     SmartCtlTemperature{Current: 35},
+		PowerOnTime:     SmartCtlPowerOnTime{Hours: 10000},
+		UserCapacity: &SmartCtlUserCapacity{
+			Bytes: 1000204886016,
+		},
+		ATASMARTAttributes: &SmartCtlATASMARTAttributes{
+			Table: []SmartCtlATASMARTEntry{
+				{ID: 5, Name: "Reallocated_Sector_Ct", Value: 100, Raw: SmartCtlATASMARTRaw{Value: 3}},
+				{ID: 197, Name: "Current_Pending_Sector", Value: 100, Raw: SmartCtlATASMARTRaw{Value: 1}},
+				{ID: 199, Name: "UDMA_CRC_Error_Count", Value: 100, Raw: SmartCtlATASMARTRaw{Value: 5}},
+			},
+		},
+		SmartStatus: SmartCtlSmartStatus{Passed: true},
+	}
+
+	deviceInfo := &DeviceInfo{Capacity: -1}
+	FillDeviceInfoFromSmartData(deviceInfo, smartData)
+	smartAttrs := GetSmartAttributes()
+
+	result := normalizeSmartData(smartData, deviceInfo, smartAttrs, "node1", "instance1", "")
+
+	assert.Equal(t, "node1", result.NodeName)
+	assert.Equal(t, "instance1", result.InstanceID)
+	assert.Equal(t, "/dev/sda", result.Device)
+	assert.NotNil(t, result.TemperatureCelsius)
+	assert.Equal(t, int64(35), *result.TemperatureCelsius)
+	assert.NotNil(t, result.ReallocatedSectors)
+	assert.Equal(t, int64(3), *result.ReallocatedSectors)
+	assert.NotNil(t, result.PendingSectors)
+	assert.Equal(t, int64(1), *result.PendingSectors)
+	assert.NotNil(t, result.PowerOnHours)
+	assert.Equal(t, int64(10000), *result.PowerOnHours)
+	assert.Equal(t, int64(5), result.ErrorCounts["UDMA_CRC_Error_Count"])
+	assert.True(t, result.CapacityGB > 0)
+}
+
+func TestNormalizeSmartData_NVMe(t *testing.T) {
+	smartData := &SmartCtlOutput{
+		Device: SmartCtlDevice{
+			Name:     "/dev/nvme0n1",
+			Protocol: "NVMe",
+			Type:     "nvme",
+		},
+		ModelName:       "Samsung SSD 980 PRO",
+		SerialNumber:    "S5GXNF0N123456",
+		FirmwareVersion: "5B2QGXA7",
+		Temperature:     SmartCtlTemperature{Current: 40},
+		NVMeSmartHealthInfoLog: &SmartCtlNVMeSmartHealthInfoLog{
+			PercentageUsed: 5,
+		},
+		SmartStatus: SmartCtlSmartStatus{Passed: true},
+	}
+
+	deviceInfo := &DeviceInfo{Capacity: 1000.0}
+	smartAttrs := GetSmartAttributes()
+
+	result := normalizeSmartData(smartData, deviceInfo, smartAttrs, "node2", "instance2", "")
+
+	assert.Equal(t, "node2", result.NodeName)
+	assert.Equal(t, "/dev/nvme0n1", result.Device)
+	assert.NotNil(t, result.TemperatureCelsius)
+	assert.Equal(t, int64(40), *result.TemperatureCelsius)
+	assert.NotNil(t, result.SSDLifeUsed)
+	assert.Equal(t, int64(5), *result.SSDLifeUsed)
+}
+
+func TestNormalizeSmartData_SCSI(t *testing.T) {
+	smartData := &SmartCtlOutput{
+		Device: SmartCtlDevice{
+			Name:     "/dev/sdb",
+			Protocol: "SCSI",
+			Type:     "scsi",
+		},
+		Temperature:     SmartCtlTemperature{Current: 30},
+		PowerOnTime:     SmartCtlPowerOnTime{Hours: 20000},
+		SCSIGrownDefectList: 5,
+		SCSIStartStopCycleCounter: &SmartCtlSCSIStartStopCycle{
+			AccumulatedStartStopCycles: 100,
+		},
+		SmartStatus: SmartCtlSmartStatus{Passed: true},
+	}
+
+	deviceInfo := &DeviceInfo{Capacity: 4000.0}
+	smartAttrs := GetSmartAttributes()
+
+	result := normalizeSmartData(smartData, deviceInfo, smartAttrs, "node3", "instance3", "")
+
+	assert.Equal(t, "/dev/sdb", result.Device)
+	assert.NotNil(t, result.TemperatureCelsius)
+	assert.Equal(t, int64(30), *result.TemperatureCelsius)
+	assert.NotNil(t, result.PowerOnHours)
+	assert.Equal(t, int64(20000), *result.PowerOnHours)
+	assert.NotNil(t, result.ReallocatedSectors)
+	assert.Equal(t, int64(5), *result.ReallocatedSectors)
+}
+
+func TestNormalizeSmartData_ZeroTemperature(t *testing.T) {
+	smartData := &SmartCtlOutput{
+		Device: SmartCtlDevice{
+			Name:     "/dev/sda",
+			Protocol: "ATA",
+		},
+		Temperature: SmartCtlTemperature{Current: 0},
+		SmartStatus: SmartCtlSmartStatus{Passed: true},
+	}
+
+	deviceInfo := &DeviceInfo{Capacity: 500.0}
+	smartAttrs := GetSmartAttributes()
+
+	result := normalizeSmartData(smartData, deviceInfo, smartAttrs, "node", "inst", "")
+
+	assert.Nil(t, result.TemperatureCelsius) // 0 temp should result in nil
+}
