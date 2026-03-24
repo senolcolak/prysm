@@ -5,6 +5,7 @@
 package diskhealthmetrics
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -437,4 +438,100 @@ func TestNormalizeSmartData_ZeroTemperature(t *testing.T) {
 	result := normalizeSmartData(smartData, deviceInfo, smartAttrs, "node", "inst", "")
 
 	assert.Nil(t, result.TemperatureCelsius) // 0 temp should result in nil
+}
+
+func TestCollectSmartDataFromFile_ValidJSON(t *testing.T) {
+	// Create a temp file with valid smartctl JSON
+	tmpFile, err := os.CreateTemp("", "smartctl-*.json")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	jsonContent := `{
+		"json_format_version": [1, 0],
+		"smartctl": {"version": [7, 4], "exit_status": 0},
+		"device": {"name": "/dev/sda", "type": "sat", "protocol": "ATA"},
+		"model_name": "Test SSD 1TB",
+		"serial_number": "TEST123",
+		"firmware_version": "1.0",
+		"smart_status": {"passed": true},
+		"smart_support": {"available": true, "enabled": true},
+		"temperature": {"current": 35}
+	}`
+
+	_, err = tmpFile.WriteString(jsonContent)
+	assert.NoError(t, err)
+	tmpFile.Close()
+
+	result, err := collectSmartDataFromFile(tmpFile.Name())
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "Test SSD 1TB", result.ModelName)
+	assert.Equal(t, "TEST123", result.SerialNumber)
+	assert.Equal(t, "/dev/sda", result.Device.Name)
+	assert.True(t, result.SmartStatus.Passed)
+	assert.Equal(t, int64(35), result.Temperature.Current)
+}
+
+func TestCollectSmartDataFromFile_InvalidJSON(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "smartctl-*.json")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	_, err = tmpFile.WriteString("not valid json")
+	assert.NoError(t, err)
+	tmpFile.Close()
+
+	_, err = collectSmartDataFromFile(tmpFile.Name())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "error parsing JSON")
+}
+
+func TestCollectSmartDataFromFile_NonExistentFile(t *testing.T) {
+	_, err := collectSmartDataFromFile("/nonexistent/path/to/file.json")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "error reading file")
+}
+
+func TestCollectSmartDataFromFile_NVMeDevice(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "smartctl-nvme-*.json")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	jsonContent := `{
+		"json_format_version": [1, 0],
+		"smartctl": {"version": [7, 4], "exit_status": 0},
+		"device": {"name": "/dev/nvme0n1", "type": "nvme", "protocol": "NVMe"},
+		"model_name": "Samsung SSD 980 PRO",
+		"serial_number": "S5GXNF0N123456",
+		"firmware_version": "5B2QGXA7",
+		"smart_status": {"passed": true, "nvme": {"value": 0}},
+		"smart_support": {"available": true, "enabled": true},
+		"temperature": {"current": 40},
+		"nvme_smart_health_information_log": {
+			"available_spare": 100,
+			"available_spare_threshold": 10,
+			"percentage_used": 5,
+			"media_errors": 0,
+			"num_err_log_entries": 0,
+			"power_on_hours": 5000,
+			"power_cycles": 200,
+			"temperature": 40
+		},
+		"nvme_pci_vendor": {"id": 5197, "subsystem_id": 5197},
+		"nvme_total_capacity": 1000204886016
+	}`
+
+	_, err = tmpFile.WriteString(jsonContent)
+	assert.NoError(t, err)
+	tmpFile.Close()
+
+	result, err := collectSmartDataFromFile(tmpFile.Name())
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "NVMe", result.Device.Protocol)
+	assert.NotNil(t, result.NVMeSmartHealthInfoLog)
+	assert.Equal(t, int64(5), result.NVMeSmartHealthInfoLog.PercentageUsed)
+	assert.Equal(t, int64(5000), result.NVMeSmartHealthInfoLog.PowerOnHours)
+	assert.NotNil(t, result.NVMePCIVendor)
+	assert.Equal(t, int64(5197), result.NVMePCIVendor.ID)
 }
